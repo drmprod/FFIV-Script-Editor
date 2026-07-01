@@ -24,6 +24,7 @@ from .model.encoding  import encode_size
 from .util            import json_to_display
 from .widgets         import CardCanvas, CardData
 from .ui_view_dialog  import ViewDialog
+from .config          import EditorConfig
 
 CFG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ff4_editor.cfg")
 
@@ -34,28 +35,16 @@ class FF4Editor(QMainWindow):
         super().__init__()
         self.setWindowTitle("FF4 Translation Editor")
 
-        # ── Settings (public so CardCanvas / dialogs can read them) ──────────
-        self.card_rows   = 8
-        self.card_w      = 300
-        self.show_ruler  = True
-        self.show_colors = True
-        self.warn_chars  = 24
-        self.over_chars  = 26
-        self.auto_wrap   = True
-        self.card_font   = 'Hack'
-        self.font_size   = 11
-        self.show_bands  = True
-        self.band0_color = C_BAND0_DEF
-        self.band1_color = C_BAND1_DEF
-        self.ruler_chars = 28
+        # ── Settings Configuration Object ──────────
+        self.config = EditorConfig()
 
-        self.verbose     = False
-        self._cur_map_idx= 0
+        self.verbose      = False
+        self._cur_map_idx = 0
+        self._section_overrides: dict = {}  # section_key -> {setting: value, ...}
 
         self._load_cfg()
-        self._apply_font()
-
-        self.auto_hyphenate = False
+        self.config.apply_font()
+        self._base_settings = self._snapshot_settings()
 
         # ── Model ─────────────────────────────────────────────────────────────
         self._model = FF4Model(self)
@@ -63,15 +52,6 @@ class FF4Editor(QMainWindow):
         self._model.section_changed.connect(self._on_section_changed)
 
         self._build_ui()
-
-    # ── Font ──────────────────────────────────────────────────────────────────
-
-    def _apply_font(self):
-        f = QFont(self.card_font, self.font_size)
-        if not f.exactMatch():
-            f = QFont('Monospace', self.font_size)
-            f.setStyleHint(QFont.StyleHint.Monospace)
-        self._mono_font = f
 
     # ── UI construction ───────────────────────────────────────────────────────
 
@@ -239,7 +219,7 @@ class FF4Editor(QMainWindow):
         crow = QWidget()
         crl = QHBoxLayout(crow)
         crl.setContentsMargins(0, 0, 0, 0); crl.setSpacing(0)
-        self._canvas = CardCanvas(self)
+        self._canvas = CardCanvas(self.config, self)
         self._canvas.card_committed.connect(self._on_card_committed)
         crl.addWidget(self._canvas, 1)
         vbar = QScrollBar(Qt.Orientation.Vertical)
@@ -283,7 +263,9 @@ class FF4Editor(QMainWindow):
     def _on_model_loaded(self):
         path = self._model.filepath
         self._load_cfg(path)
-        self._apply_font()
+        self.config.apply_font()
+        # Inject the parsed DTE dictionary into the rendering canvas
+        self._canvas.dte_set = self._model.dte_set
         self._populate_sidebar()
         self.save_btn.setEnabled(True)
         name = os.path.basename(path)
@@ -327,9 +309,39 @@ class FF4Editor(QMainWindow):
             return
         self._cur_section = current._section_key
         print(f"[section selected] {self._cur_section}")
+        self._apply_section_override(self._cur_section)
         self._load_section(self._cur_section)
 
     # ── Section loading → CardData list ──────────────────────────────────────
+
+    def _snapshot_settings(self) -> dict:
+        """Capture all current settings into a dict."""
+        return {k: getattr(self.config, k) for k in [
+            'card_rows', 'card_w', 'show_ruler', 'show_colors',
+            'warn_chars', 'over_chars', 'ruler_chars', 'auto_wrap',
+            'auto_hyphenate', 'char_limit', 'line_limit', 'hard_char_limit',
+            'card_font', 'font_size', 'show_bands',
+            'band0_color', 'band1_color',
+        ]}
+
+    def _apply_section_override(self, key: str):
+        """Restore base settings then apply section-specific overrides."""
+        CASTS = {
+            'card_rows': int, 'card_w': int, 'warn_chars': int,
+            'over_chars': int, 'ruler_chars': int, 'font_size': int,
+            'char_limit': int, 'line_limit': int, 'hard_char_limit': bool,
+            'show_ruler': bool, 'show_colors': bool, 'auto_wrap': bool,
+            'show_bands': bool, 'auto_hyphenate': bool,
+            'card_font': str, 'band0_color': str, 'band1_color': str,
+        }
+        for attr, val in self._base_settings.items():
+            setattr(self.config, attr, val)
+        ov = self._section_overrides.get(key, {})
+        for attr, val in ov.items():
+            if attr in CASTS:
+                setattr(self.config, attr, CASTS[attr](val))
+
+        self.config.apply_font()
 
     def _load_section(self, key: str):
         items  = self._model.section_items(key)
@@ -496,42 +508,66 @@ class FF4Editor(QMainWindow):
     # ── View menu ─────────────────────────────────────────────────────────────
 
     def _on_view_menu(self):
-        dlg = ViewDialog(self, parent=self)
+        cur = getattr(self, '_cur_section', None)
+        # Check if the current section has an existing override
+        has_override = cur in self._section_overrides if cur else False
+        # Pass self.config instead of self
+        dlg = ViewDialog(self.config, section=cur, has_section_override=has_override, parent=self)
         if dlg.exec():
-            changed = dlg.result_settings
-            if not changed:
+            changed      = dlg.result_settings
+            section_only = dlg.section_only
+            clear_section= dlg.clear_section
+            if not changed and not clear_section:
+                return
+            if clear_section and cur:
+                self._section_overrides.pop(cur, None)
+                self._save_cfg()
+                self._apply_section_override(cur)
+                if cur:
+                    self._load_section(cur)
                 return
             font_changed = False
-            layout_changed = False
-            for k, v in changed.items():
-                setattr(self, k, v)
-                if k in ('card_font', 'font_size'):
-                    font_changed = True
-                if k in ('card_rows', 'card_w'):
-                    layout_changed = True
+            if section_only and cur:
+                # Save ALL changed settings as section override
+                if changed:
+                    self._section_overrides.setdefault(cur, {}).update(changed)
+                font_changed = any(k in changed for k in ('card_font', 'font_size'))
+                self._apply_section_override(cur)
+            else:
+                # Apply globally, update base, re-apply section override
+                for k, v in changed.items():
+                    setattr(self.config, k, v)
+                    if k in ('card_font', 'font_size'):
+                        font_changed = True
+                self._base_settings = self._snapshot_settings()
+                self._apply_section_override(cur) if cur else None
             if font_changed:
-                self._apply_font()
+                self.config.apply_font()
             self._save_cfg()
-            if hasattr(self, '_cur_section') and self._cur_section:
-                self._load_section(self._cur_section)
+            if cur:
+                self._load_section(cur)
 
     # ── Config ────────────────────────────────────────────────────────────────
 
     def _cfg_defaults(self) -> dict:
         return {
-            'card_rows':   self.card_rows,
-            'card_w':      self.card_w,
-            'show_ruler':  self.show_ruler,
-            'show_colors': self.show_colors,
-            'warn_chars':  self.warn_chars,
-            'over_chars':  self.over_chars,
-            'auto_wrap':   self.auto_wrap,
-            'auto_hyphenate': self.auto_hyphenate,
-            'card_font':   self.card_font,
-            'font_size':   self.font_size,
-            'show_bands':  self.show_bands,
-            'band0_color': self.band0_color,
-            'band1_color': self.band1_color,
+            'card_rows':   self.config.card_rows,
+            'card_w':      self.config.card_w,
+            'show_ruler':  self.config.show_ruler,
+            'show_colors': self.config.show_colors,
+            'warn_chars':  self.config.warn_chars,
+            'over_chars':  self.config.over_chars,
+            'auto_wrap':   self.config.auto_wrap,
+            'auto_hyphenate': self.config.auto_hyphenate,
+            'char_limit':      self.config.char_limit,
+            'line_limit':      self.config.line_limit,
+            'hard_char_limit': self.config.hard_char_limit,
+            'card_font':   self.config.card_font,
+            'font_size':   self.config.font_size,
+            'show_bands':  self.config.show_bands,
+            'band0_color': self.config.band0_color,
+            'band1_color': self.config.band1_color,
+            'section_overrides': self._section_overrides,
         }
 
     def _apply_settings(self, s: dict):
@@ -540,11 +576,13 @@ class FF4Editor(QMainWindow):
             ('warn_chars',  int),  ('over_chars',  int),  ('font_size', int),
             ('show_ruler',  bool), ('show_colors', bool), ('auto_wrap', bool),
             ('show_bands',  bool), ('auto_hyphenate', bool),
+            ('char_limit',  int),  ('line_limit',  int),
+            ('hard_char_limit', bool),
             ('card_font',   str),  ('band0_color', str),  ('band1_color', str),
             ('ruler_chars', int),
         ]:
             if attr in s:
-                setattr(self, attr, cast(s[attr]))
+                setattr(self.config, attr, cast(s[attr]))
 
     def _load_cfg(self, filepath: str | None = None):
         try:
@@ -554,8 +592,11 @@ class FF4Editor(QMainWindow):
             return
         self._apply_settings(cfg.get('global', {}))
         if filepath:
-            self._apply_settings(
-                cfg.get('files', {}).get(os.path.basename(filepath), {}))
+            file_cfg = cfg.get('files', {}).get(os.path.basename(filepath), {})
+            self._apply_settings(file_cfg)
+            self._section_overrides = file_cfg.get('section_overrides', {})
+        # Update base values after loading
+        self._base_settings = self._snapshot_settings()
 
     def _save_cfg(self):
         try:
