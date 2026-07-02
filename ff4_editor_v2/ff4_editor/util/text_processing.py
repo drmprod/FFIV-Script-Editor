@@ -8,17 +8,30 @@ import re
 from ..constants import MAX_LINE_CHARS, BLANK_LINE_DISPLAY
 
 # ── Spanish hyphenator ────────────────────────────────────────────────────────
+_es_dic = None
+_pyphen_err = None
+
 try:
     import pyphen as _pyphen
     _es_dic = _pyphen.Pyphen(lang='es_ES')
-except Exception:
-    _es_dic = None
+except Exception as err:
+    _pyphen_err = err
+
+def validate_dependencies():
+    """Ensure critical text processing dependencies are available."""
+    if _es_dic is None:
+        raise RuntimeError(
+            "The 'pyphen' library or 'es_ES' dictionary could not be loaded.\n"
+            "This dependency is strictly required to ensure accurate Spanish "
+            "syllable wrapping and prevent silent ROM text overflows.\n\n"
+            f"Details: {_pyphen_err}"
+        )
 
 
 def _hyphen_break(word: str, space_left: int) -> tuple[str, str] | None:
     """
     Break `word` so that first_part + '-' fits within space_left chars.
-    Uses pyphen Spanish syllable rules, falls back to hard break.
+    Uses pyphen Spanish syllable rules.
     Returns (first_part + '-', remainder) or None if impossible.
 
     pyphen.iterate() yields pairs longest-first, so the first match that
@@ -26,13 +39,12 @@ def _hyphen_break(word: str, space_left: int) -> tuple[str, str] | None:
     """
     if space_left < 2:
         return None
+
     if _es_dic is not None:
         for left, right in _es_dic.iterate(word):
             if len(left) + 1 <= space_left:
                 return (left + '-', right)
-    cut = space_left - 1
-    if cut >= 1:
-        return (word[:cut] + '-', word[cut:])
+
     return None
 
 # ── Patterns ───────────────────────────────────────────────────────────────────

@@ -5,35 +5,44 @@ Owns: FF4Model, CardCanvas, settings, config I/O.
 Delegates: all painting to CardCanvas, all data to FF4Model.
 """
 
-import os, json
-from PySide6.QtWidgets import (
+import os, json, sys
+
+from PySide6.QtCore             import Qt, QTimer
+from PySide6.QtGui              import QFont, QFontDatabase, QUndoStack
+from PySide6.QtWidgets          import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QListWidget, QListWidgetItem, QLabel, QLineEdit,
     QPushButton, QProgressBar, QFrame, QSizePolicy, QFileDialog,
     QMessageBox, QScrollBar, QComboBox,
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui  import QFont, QFontDatabase
 
-from .constants       import (
+from .model                     import FF4Model
+from .model.encoding            import encode_size
+from .util                      import json_to_display
+from .util.text_processing      import validate_dependencies
+from .widgets                   import CardCanvas, CardData
+from .ui_view_dialog            import ViewDialog
+from .config                    import EditorConfig
+from .model.commands            import EditEntryCommand
+from .constants                 import (
     TEXT_SECTIONS, DIALOG_SECTIONS, DICT_KEY,
     C_BAND0_DEF, C_BAND1_DEF,
 )
-from .model           import FF4Model
-from .model.encoding  import encode_size
-from .util            import json_to_display
-from .widgets         import CardCanvas, CardData
-from .ui_view_dialog  import ViewDialog
-from .config          import EditorConfig
 
 CFG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ff4_editor.cfg")
-
 
 class FF4Editor(QMainWindow):
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("FF4 Translation Editor")
+
+        # Validate critical dependencies before proceeding
+        try:
+            validate_dependencies()
+        except RuntimeError as e:
+            QMessageBox.critical(self, "Startup Error", str(e))
+            sys.exit(1)
 
         # ── Settings Configuration Object ──────────
         self.config = EditorConfig()
@@ -50,7 +59,7 @@ class FF4Editor(QMainWindow):
         self._model = FF4Model(self)
         self._model.loaded.connect(self._on_model_loaded)
         self._model.section_changed.connect(self._on_section_changed)
-
+        self.undo_stack = QUndoStack(self)
         self._build_ui()
 
     # ── UI construction ───────────────────────────────────────────────────────
@@ -100,6 +109,10 @@ class FF4Editor(QMainWindow):
         rl.addWidget(tb)
 
         # Edit toolbar
+        undo_action = self.undo_stack.createUndoAction(self, "Undo")
+        undo_action.setShortcut("Ctrl+Z")
+        redo_action = self.undo_stack.createRedoAction(self, "Redo")
+        redo_action.setShortcut("Ctrl+Shift+Z")
         etb = QWidget(); etb.setObjectName('edit_toolbar')
         etbl = QHBoxLayout(etb)
         etbl.setContentsMargins(10, 4, 10, 4)
@@ -264,8 +277,8 @@ class FF4Editor(QMainWindow):
         path = self._model.filepath
         self._load_cfg(path)
         self.config.apply_font()
-        # Inject the parsed DTE dictionary into the rendering canvas
         self._canvas.dte_set = self._model.dte_set
+        self.undo_stack.clear()
         self._populate_sidebar()
         self.save_btn.setEnabled(True)
         name = os.path.basename(path)
@@ -418,8 +431,14 @@ class FF4Editor(QMainWindow):
 
     # ── Card committed callback ───────────────────────────────────────────────
 
-    def _on_card_committed(self, section: str, idx, json_text: str):
-        self._model.set_entry(section, idx, json_text)
+    def _on_card_committed(self, section, idx, json_text):
+        old_text = self._model.get_entry(section, idx)
+
+        if old_text == json_text:
+            return  # Ignore focus loss without changes
+
+        cmd = EditEntryCommand(self._model, section, idx, old_text, json_text)
+        self.undo_stack.push(cmd)
 
     def _on_section_changed(self, key: str):
         self._refresh_budget(key)
@@ -485,9 +504,12 @@ class FF4Editor(QMainWindow):
             self._model.save()
             t = f"FF4 Translation Editor — {os.path.basename(self._model.filepath)}"
             self.setWindowTitle(t)
-            self.status_lbl.setText(
-                f"Saved: {self._model.filepath}  "
-                f"({len(self._model.dirty_keys)} section(s) dirty)")
+            self.status_lbl.setText(f"Saved: {self._model.filepath}")
+
+            # Refresh all sidebar items to clear the dirty icons
+            for key in TEXT_SECTIONS:
+                self._refresh_sidebar_item(key)
+
         except Exception as e:
             QMessageBox.critical(self, "Save failed", str(e))
 
@@ -509,9 +531,7 @@ class FF4Editor(QMainWindow):
 
     def _on_view_menu(self):
         cur = getattr(self, '_cur_section', None)
-        # Check if the current section has an existing override
         has_override = cur in self._section_overrides if cur else False
-        # Pass self.config instead of self
         dlg = ViewDialog(self.config, section=cur, has_section_override=has_override, parent=self)
         if dlg.exec():
             changed      = dlg.result_settings
@@ -546,7 +566,6 @@ class FF4Editor(QMainWindow):
             self._save_cfg()
             if cur:
                 self._load_section(cur)
-
     # ── Config ────────────────────────────────────────────────────────────────
 
     def _cfg_defaults(self) -> dict:
