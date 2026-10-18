@@ -1,0 +1,17 @@
+[Desktop Entry]
+Comment[es_AR]=
+Comment=
+Exec='/home/drmprod/Proyectos/Romhacking/FFIV-Hispano/ff4_editor_vwf/Open ff4-es-data.json in editor.sh'
+GenericName[es_AR]=
+GenericName=
+Icon=/home/drmprod/Proyectos/Romhacking/FFIV-Hispano/ff4_editor_vwf/icon.png
+MimeType=
+Name[es_AR]=FFIV Script Editor-ES
+Name=Enlace a aplicación
+Path=
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=

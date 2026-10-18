@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Configuración personal del editor (se regenera; contiene fuentes/colores/overrides de cada uno)
+ff4_editor/ff4_editor_config.json
+
+# Archivos temporales de editores
+*.swp
+*.kate-swp
+.*.kate-swp
+*~
+.idea/
+.vscode/
+
+# Datos generados / copyright: no subir ROMs ni el JSON extraído (make rip)
+*.sfc
+*.smc
+*.spc
+ff4-*-data*.json
