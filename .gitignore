@@ -26,3 +26,6 @@ ff4_editor/ff4_editor_config.json
 *.smc
 *.spc
 ff4-*-data*.json
+
+*.desktop
+*.sh
