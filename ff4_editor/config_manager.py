@@ -17,7 +17,7 @@ import shutil
 from dataclasses import asdict, dataclass, field
 
 from .config import EditorConfig
-from .constants import VWF_SECTION_LIMIT_PX
+from .constants import VWF_SECTION_LIMIT_PX, VWF_SECTION_LINE_LIMIT
 from .errors import FileSaveError
 from .i18n import tr
 from .typed_config import (
@@ -60,6 +60,8 @@ class ConfigManager:
         eff = asdict(EditorSettings())
         if section in VWF_SECTION_LIMIT_PX:  # game box of that section, below any explicit setting
             eff[ConfigKey.VWF_LIMIT_PX.value] = VWF_SECTION_LIMIT_PX[section]
+        if section in VWF_SECTION_LINE_LIMIT:
+            eff[ConfigKey.LINE_LIMIT.value] = VWF_SECTION_LINE_LIMIT[section]
         eff.update(self._global)
         eff.update(self._file)
         ov = self._section_overrides.get(section) if section else None

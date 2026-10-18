@@ -240,3 +240,20 @@ def test_page_lines_per_section():
     assert (
         page_lines_for("mapTitle") == 2 and page_lines_for("eventDialog1") == 4 and page_lines_for(None) == 4
     )
+
+
+def test_item_description_box_defaults(tmp_path):
+    from ff4_editor.config import EditorConfig
+    from ff4_editor.config_manager import ConfigManager
+    from ff4_editor.constants import page_lines_for
+
+    cfg = EditorConfig()
+    mgr = ConfigManager(cfg, str(tmp_path / "c.json"))
+    mgr.load("/x/ff4-xx-data.json")
+    mgr.apply_section_override("itemDescription")
+    assert (cfg.vwf_limit_px, cfg.line_limit) == (152, 2) and page_lines_for("itemDescription") == 2
+    mgr.apply_section_override("eventDialog1")
+    assert cfg.vwf_limit_px == 224 and cfg.line_limit == 0
+    mgr.update_from_dialog({"line_limit": 3}, "itemDescription", section_only=True)  # explícito: gana
+    mgr.apply_section_override("itemDescription")
+    assert cfg.line_limit == 3

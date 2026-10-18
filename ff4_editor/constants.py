@@ -64,8 +64,11 @@ VWF_SECTIONS = {
 }
 # Sections whose game box differs from the dialogue box: usable width in px and lines per 'page'.
 # They are the defaults for that section; anything the user sets explicitly wins.
-VWF_SECTION_LIMIT_PX = {"mapTitle": 176}
-VWF_SECTION_PAGE_LINES = {"mapTitle": 2}
+#   itemDescription: ItemDescWindow (19 x 3 tiles) holds 2 lines of 152 px (menu/vwf_item.asm).
+VWF_SECTION_LIMIT_PX = {"mapTitle": 176, "itemDescription": 152}
+VWF_SECTION_PAGE_LINES = {"mapTitle": 2, "itemDescription": 2}
+# Hard number of lines the game box can show (default `line_limit` of the section).
+VWF_SECTION_LINE_LIMIT = {"itemDescription": 2}
 
 
 def page_lines_for(section: str | None) -> int:
